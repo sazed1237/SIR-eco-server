@@ -162,8 +162,6 @@ async function run() {
         })
 
 
-
-
         // cart Collections 
         app.get('/carts', async (req, res) => {
             const email = req.query.email;
@@ -231,6 +229,92 @@ async function run() {
         })
 
 
+        // Admin Stats 
+        app.get('/admin-stats', VerifyJWT, verifyAdmin, async (req, res) => {
+            const users = await userCollections.estimatedDocumentCount();
+            const products = await productsCollections.estimatedDocumentCount();
+            const oderResult = await paymentCollections.aggregate([
+                {
+                    $group: {
+                        _id: null,
+                        totalOrders: {
+                            $sum: '$quantity'
+                        }
+                    }
+                }
+            ]).toArray()
+            const orders = oderResult.length > 0 ? oderResult[0].totalOrders : 0;
+
+            const result = await paymentCollections.aggregate([
+                {
+                    $group: {
+                        _id: null,
+                        totalRevenue: {
+                            $sum: '$price'
+                        }
+                    }
+                }
+            ]).toArray()
+            const revenue = (result.length > 0 ? result[0].totalRevenue : 0).toFixed(2)
+
+            res.send({
+                users,
+                products,
+                revenue,
+                orders
+            })
+        })
+
+        // using aggregate pipeline
+        app.get('/order-stats', VerifyJWT, verifyAdmin, async (req, res) => {
+            const result = await paymentCollections.aggregate([
+                {
+                    $unwind: '$productIds'
+                },
+                {
+                    $addFields: {
+                        productIdObject: { $toObjectId: '$productIds' }     //add temporary ObjectId field
+                    }
+                },
+                {
+                    $lookup: {
+                        from: 'products',
+                        localField: 'productIdObject',
+                        foreignField: '_id',
+                        as: 'products'
+                    }
+                },
+
+                // {
+                //     $project: {
+                //         productIdObject: 0      // remove the temporary ObjectId field
+                //     }
+                // },
+
+                {
+                    $unwind: '$products'
+                },
+                {
+                    $group: {
+                        _id: '$products.category',
+                        quantity: { $sum: 1 },      // Count the number of documents in each category
+                        revenue: { $sum: '$products.price' }    // Sum the price for each category
+                    }
+                },
+                {
+                    $project: {
+                        _id: 0,
+                        category: '$_id',
+                        quantity: '$quantity',
+                        revenue: '$revenue'
+                    }
+                }
+
+
+            ]).toArray()
+
+            res.send(result)
+        })
 
 
         // Send a ping to confirm a successful connection
